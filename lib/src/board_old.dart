@@ -23,6 +23,8 @@ class Board {
   final SquareSet occupied;
 
   /// All squares occupied by pieces known to be promoted.
+  ///
+  /// This information is relevant in chess variants like [Crazyhouse].
   final SquareSet promoted;
 
   /// All squares occupied by white pieces.
@@ -65,19 +67,18 @@ class Board {
 
   /// Racing Kings start position
   static const racingKings = Board(
-    occupied: SquareSet(0xffff),
-    promoted: SquareSet.empty,
-    white: SquareSet(0xf0f0),
-    black: SquareSet(0x0f0f),
-    pawns: SquareSet.empty,
-    knights: SquareSet(0x1818),
-    bishops: SquareSet(0x2424),
-    rooks: SquareSet(0x4242),
-    queens: SquareSet(0x0081),
-    kings: SquareSet(0x8100),
-  );
+      occupied: SquareSet(0xffff),
+      promoted: SquareSet.empty,
+      white: SquareSet(0xf0f0),
+      black: SquareSet(0x0f0f),
+      pawns: SquareSet.empty,
+      knights: SquareSet(0x1818),
+      bishops: SquareSet(0x2424),
+      rooks: SquareSet(0x4242),
+      queens: SquareSet(0x0081),
+      kings: SquareSet(0x8100));
 
-  /// Horde start Position
+  /// Horde start Positioin
   static const horde = Board(
     occupied: SquareSet(0xffff0066ffffffff),
     promoted: SquareSet.empty,
@@ -106,6 +107,8 @@ class Board {
   );
 
   /// Parse the board part of a FEN string and returns a Board.
+  ///
+  /// Throws a [FenException] if the provided FEN string is not valid.
   factory Board.parseFen(String boardFen) {
     Board board = Board.empty;
     int rank = 7;
@@ -173,23 +176,16 @@ class Board {
     return buffer.toString();
   }
 
-  /// A flat list of each [Piece] associated with its [Square].
-  Iterable<(Square, Piece)> get pieces {
-    final squares = occupied.toSquareList();
-    return List<(Square, Piece)>.generate(
-      squares.length,
-      (i) {
-        final square = squares[i];
-        return (square, pieceAt(square)!);
-      },
-      growable: false,
-    );
+  /// An iterable of each [Piece] associated to its [Square].
+  Iterable<(Square, Piece)> get pieces sync* {
+    for (final square in occupied.squares) {
+      yield (square, pieceAt(square)!);
+    }
   }
 
   /// Gets the number of pieces of each [Role] for the given [Side].
-  ByRole<int> materialCount(Side side) => {
-        for (final role in Role.values) role: piecesOf(side, role).size,
-      };
+  ByRole<int> materialCount(Side side) => Map.fromEntries(
+      Role.values.map((role) => MapEntry(role, piecesOf(side, role).size)));
 
   /// A [SquareSet] of all the pieces matching this [Side] and [Role].
   SquareSet piecesOf(Side side, Role role) {
@@ -197,7 +193,6 @@ class Board {
   }
 
   /// Gets all squares occupied by [Side].
-  @pragma('vm:prefer-inline')
   SquareSet bySide(Side side) => side == Side.white ? white : black;
 
   /// Gets all squares occupied by [Role].
@@ -224,37 +219,35 @@ class Board {
   }
 
   /// Gets the [Side] at this [Square], if any.
-  @pragma('vm:prefer-inline')
   Side? sideAt(Square square) {
-    if (white.has(square)) return Side.white;
-    if (black.has(square)) return Side.black;
-    return null;
+    if (bySide(Side.white).has(square)) {
+      return Side.white;
+    } else if (bySide(Side.black).has(square)) {
+      return Side.black;
+    } else {
+      return null;
+    }
   }
 
   /// Gets the [Role] at this [Square], if any.
-  /// OPTIMIZED: Inline direct calls over internal object wrappers.
-  @pragma('vm:prefer-inline')
   Role? roleAt(Square square) {
-    if (!occupied.has(square)) return null;
-    if (pawns.has(square)) return Role.pawn;
-    if (knights.has(square)) return Role.knight;
-    if (bishops.has(square)) return Role.bishop;
-    if (rooks.has(square)) return Role.rook;
-    if (queens.has(square)) return Role.queen;
-    if (kings.has(square)) return Role.king;
+    for (final role in Role.values) {
+      if (byRole(role).has(square)) {
+        return role;
+      }
+    }
     return null;
   }
 
   /// Gets the [Piece] at this [Square], if any.
-  @pragma('vm:prefer-inline')
   Piece? pieceAt(Square square) {
-    final role = roleAt(square);
-    if (role == null) return null;
-    return Piece(
-      color: white.has(square) ? Side.white : Side.black,
-      role: role,
-      promoted: promoted.has(square),
-    );
+    final side = sideAt(square);
+    if (side == null) {
+      return null;
+    }
+    final role = roleAt(square)!;
+    final prom = promoted.has(square);
+    return Piece(color: side, role: role, promoted: prom);
   }
 
   /// Finds the unique king [Square] of the given [Side], if any.
@@ -263,7 +256,6 @@ class Board {
   }
 
   /// Finds the squares who are attacking `square` by the `attacker` [Side].
-  @pragma('vm:prefer-inline')
   SquareSet attacksTo(Square square, Side attacker, {SquareSet? occupied}) =>
       bySide(attacker).intersect(rookAttacks(square, occupied ?? this.occupied)
           .intersect(rooksAndQueens)
@@ -276,79 +268,45 @@ class Board {
   /// Puts a [Piece] on a [Square] overriding the existing one, if any.
   @useResult
   Board setPieceAt(Square square, Piece piece) {
-    if (!occupied.has(square)) {
-      return Board(
-        occupied: occupied.withSquare(square),
-        promoted: piece.promoted ? promoted.withSquare(square) : promoted,
-        white: piece.color == Side.white ? white.withSquare(square) : white,
-        black: piece.color == Side.black ? black.withSquare(square) : black,
-        pawns: piece.role == Role.pawn ? pawns.withSquare(square) : pawns,
-        knights:
-            piece.role == Role.knight ? knights.withSquare(square) : knights,
-        bishops:
-            piece.role == Role.bishop ? bishops.withSquare(square) : bishops,
-        rooks: piece.role == Role.rook ? rooks.withSquare(square) : rooks,
-        queens: piece.role == Role.queen ? queens.withSquare(square) : queens,
-        kings: piece.role == Role.king ? kings.withSquare(square) : kings,
-      );
-    }
-
-    final oldRole = roleAt(square)!;
-    final oldColor = white.has(square) ? Side.white : Side.black;
-
-    return Board(
-      occupied: occupied,
-      promoted: piece.promoted
-          ? promoted.withSquare(square)
-          : (promoted.has(square) ? promoted.withoutSquare(square) : promoted),
-      white: piece.color == Side.white
-          ? white.withSquare(square)
-          : (oldColor == Side.white ? white.withoutSquare(square) : white),
-      black: piece.color == Side.black
-          ? black.withSquare(square)
-          : (oldColor == Side.black ? black.withoutSquare(square) : black),
-      pawns: piece.role == Role.pawn
-          ? pawns.withSquare(square)
-          : (oldRole == Role.pawn ? pawns.withoutSquare(square) : pawns),
-      knights: piece.role == Role.knight
-          ? knights.withSquare(square)
-          : (oldRole == Role.knight ? knights.withoutSquare(square) : knights),
-      bishops: piece.role == Role.bishop
-          ? bishops.withSquare(square)
-          : (oldRole == Role.bishop ? bishops.withoutSquare(square) : bishops),
-      rooks: piece.role == Role.rook
-          ? rooks.withSquare(square)
-          : (oldRole == Role.rook ? rooks.withoutSquare(square) : rooks),
-      queens: piece.role == Role.queen
-          ? queens.withSquare(square)
-          : (oldRole == Role.queen ? queens.withoutSquare(square) : queens),
-      kings: piece.role == Role.king
-          ? kings.withSquare(square)
-          : (oldRole == Role.king ? kings.withoutSquare(square) : kings),
+    return removePieceAt(square).copyWith(
+      occupied: occupied.withSquare(square),
+      promoted: piece.promoted ? promoted.withSquare(square) : null,
+      white: piece.color == Side.white ? white.withSquare(square) : null,
+      black: piece.color == Side.black ? black.withSquare(square) : null,
+      pawns: piece.role == Role.pawn ? pawns.withSquare(square) : null,
+      knights: piece.role == Role.knight ? knights.withSquare(square) : null,
+      bishops: piece.role == Role.bishop ? bishops.withSquare(square) : null,
+      rooks: piece.role == Role.rook ? rooks.withSquare(square) : null,
+      queens: piece.role == Role.queen ? queens.withSquare(square) : null,
+      kings: piece.role == Role.king ? kings.withSquare(square) : null,
     );
   }
 
   /// Removes the [Piece] at this [Square] if it exists.
   @useResult
   Board removePieceAt(Square square) {
-    if (!occupied.has(square)) return this;
-
-    final oldRole = roleAt(square)!;
-    final isWhite = white.has(square);
-
-    return Board(
-      occupied: occupied.withoutSquare(square),
-      promoted:
-          promoted.has(square) ? promoted.withoutSquare(square) : promoted,
-      white: isWhite ? white.withoutSquare(square) : white,
-      black: !isWhite ? black.withoutSquare(square) : black,
-      pawns: oldRole == Role.pawn ? pawns.withoutSquare(square) : pawns,
-      knights: oldRole == Role.knight ? knights.withoutSquare(square) : knights,
-      bishops: oldRole == Role.bishop ? bishops.withoutSquare(square) : bishops,
-      rooks: oldRole == Role.rook ? rooks.withoutSquare(square) : rooks,
-      queens: oldRole == Role.queen ? queens.withoutSquare(square) : queens,
-      kings: oldRole == Role.king ? kings.withoutSquare(square) : kings,
-    );
+    final piece = pieceAt(square);
+    return piece != null
+        ? copyWith(
+            occupied: occupied.withoutSquare(square),
+            promoted: piece.promoted ? promoted.withoutSquare(square) : null,
+            white:
+                piece.color == Side.white ? white.withoutSquare(square) : null,
+            black:
+                piece.color == Side.black ? black.withoutSquare(square) : null,
+            pawns: piece.role == Role.pawn ? pawns.withoutSquare(square) : null,
+            knights: piece.role == Role.knight
+                ? knights.withoutSquare(square)
+                : null,
+            bishops: piece.role == Role.bishop
+                ? bishops.withoutSquare(square)
+                : null,
+            rooks: piece.role == Role.rook ? rooks.withoutSquare(square) : null,
+            queens:
+                piece.role == Role.queen ? queens.withoutSquare(square) : null,
+            kings: piece.role == Role.king ? kings.withoutSquare(square) : null,
+          )
+        : this;
   }
 
   /// Returns a new board with a new [promoted] square set.

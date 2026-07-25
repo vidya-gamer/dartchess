@@ -2,6 +2,8 @@ import 'package:benchmark/benchmark.dart';
 import 'package:dartchess/dartchess.dart';
 import 'dart:io' as io;
 
+//dart run benchmark
+
 void main() {
   benchmark('make fen from initial position', () {
     Chess.initial.fen;
@@ -54,7 +56,33 @@ void main() {
     game.makePgn();
   });
 
-  benchmark('initial position perft at depth 5', () {
-    perft(Chess.initial, 5);
-  }, iterations: 1);
+  group('Perft', () {
+    benchmark('initial position perft at depth 5', () {
+      perft(Chess.initial, 5);
+    }, iterations: 1);
+
+    benchmark('Crazyhouse position perft at depth 5', () {
+      perft(Crazyhouse.initial, 5);
+    }, iterations: 1);
+
+    benchmark('Horde position perft at depth 5', () {
+      perft(Horde.initial, 5);
+    }, iterations: 1);
+
+    benchmark('RacingKings position perft at depth 5', () {
+      perft(RacingKings.initial, 5);
+    }, iterations: 1);
+
+    benchmark('Atomic position perft at depth 5', () {
+      perft(Atomic.initial, 5);
+    }, iterations: 1);
+
+    benchmark('Antichess position perft at depth 5', () {
+      perft(Antichess.initial, 5);
+    }, iterations: 1);
+
+    benchmark('ThreeCheck position perft at depth 5', () {
+      perft(ThreeCheck.initial, 5);
+    }, iterations: 1);
+  });
 }

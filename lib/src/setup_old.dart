@@ -31,16 +31,11 @@ class Setup {
   ///
   /// Throws a [FenException] if the provided FEN is not valid.
   factory Setup.parseFen(String fen) {
-    // Trim leading/trailing whitespace first to make parsing resilient
-    final trimmedFen = fen.trim(); //old one doesn't trim!
-
-    final parts = _splitFen(trimmedFen);
+    final parts = fen.split(RegExp(r'[\s_]+'));
     if (parts.isEmpty) throw const FenException(IllegalFenCause.format);
 
-    int partIndex = 0;
-
     // board and pockets
-    final boardPart = parts[partIndex++];
+    final boardPart = parts.removeAt(0);
     Pockets? pockets;
     Board board;
     if (boardPart.endsWith(']')) {
@@ -63,10 +58,10 @@ class Setup {
 
     // turn
     Side turn;
-    if (partIndex >= parts.length) {
+    if (parts.isEmpty) {
       turn = Side.white;
     } else {
-      final turnPart = parts[partIndex++];
+      final turnPart = parts.removeAt(0);
       if (turnPart == 'w') {
         turn = Side.white;
       } else if (turnPart == 'b') {
@@ -78,17 +73,17 @@ class Setup {
 
     // Castling
     SquareSet castlingRights;
-    if (partIndex >= parts.length) {
+    if (parts.isEmpty) {
       castlingRights = SquareSet.empty;
     } else {
-      final castlingPart = parts[partIndex++];
+      final castlingPart = parts.removeAt(0);
       castlingRights = _parseCastlingFen(board, castlingPart);
     }
 
     // En passant square
     Square? epSquare;
-    if (partIndex < parts.length) {
-      final epPart = parts[partIndex++];
+    if (parts.isNotEmpty) {
+      final epPart = parts.removeAt(0);
       if (epPart != '-') {
         epSquare = Square.parse(epPart);
         if (epSquare == null) {
@@ -98,25 +93,25 @@ class Setup {
     }
 
     // move counters or remainingChecks
-    String? halfmovePart = partIndex < parts.length ? parts[partIndex++] : null;
+    String? halfmovePart = parts.isNotEmpty ? parts.removeAt(0) : null;
     (int, int)? earlyRemainingChecks;
     if (halfmovePart != null && halfmovePart.contains('+')) {
       earlyRemainingChecks = _parseRemainingChecks(halfmovePart);
-      halfmovePart = partIndex < parts.length ? parts[partIndex++] : null;
+      halfmovePart = parts.isNotEmpty ? parts.removeAt(0) : null;
     }
     final halfmoves = halfmovePart != null ? _parseSmallUint(halfmovePart) : 0;
     if (halfmoves == null) {
       throw const FenException(IllegalFenCause.halfmoveClock);
     }
 
-    final fullmovesPart = partIndex < parts.length ? parts[partIndex++] : null;
+    final fullmovesPart = parts.isNotEmpty ? parts.removeAt(0) : null;
     final fullmoves =
         fullmovesPart != null ? _parseSmallUint(fullmovesPart) : 1;
     if (fullmoves == null) {
       throw const FenException(IllegalFenCause.fullmoveNumber);
     }
 
-    final remainingChecksPart = partIndex < parts.length ? parts[partIndex++] : null;
+    final remainingChecksPart = parts.isNotEmpty ? parts.removeAt(0) : null;
     (int, int)? remainingChecks;
     if (remainingChecksPart != null) {
       if (earlyRemainingChecks != null) {
@@ -127,7 +122,7 @@ class Setup {
       remainingChecks = earlyRemainingChecks;
     }
 
-    if (partIndex < parts.length) {
+    if (parts.isNotEmpty) {
       throw const FenException(IllegalFenCause.format);
     }
 
@@ -182,41 +177,15 @@ class Setup {
   String get turnLetter => turn.name[0];
 
   /// FEN representation of the setup.
-  String get fen {
-    final buffer = StringBuffer();
-
-    // 1. Board & Pockets
-    buffer.write(board.fen);
-    if (pockets != null) {
-      buffer.write(_makePockets(pockets!));
-    }
-    buffer.write(' ');
-
-    // 2. Turn
-    buffer.write(turnLetter);
-    buffer.write(' ');
-
-    // 3. Castling
-    buffer.write(_makeCastlingFen(board, castlingRights));
-    buffer.write(' ');
-
-    // 4. En Passant
-    buffer.write(epSquare != null ? epSquare!.name : '-');
-
-    // 5. Remaining Checks
-    if (remainingChecks != null) {
-      buffer.write(' ');
-      buffer.write(_makeRemainingChecks(remainingChecks!));
-    }
-
-    // 6. Move Clocks
-    buffer.write(' ');
-    buffer.write(math.max(0, math.min(halfmoves, 9999)));
-    buffer.write(' ');
-    buffer.write(math.max(1, math.min(fullmoves, 9999)));
-
-    return buffer.toString();
-  }
+  String get fen => [
+        board.fen + (pockets != null ? _makePockets(pockets!) : ''),
+        turnLetter,
+        _makeCastlingFen(board, castlingRights),
+        if (epSquare != null) epSquare!.name else '-',
+        if (remainingChecks != null) _makeRemainingChecks(remainingChecks!),
+        math.max(0, math.min(halfmoves, 9999)),
+        math.max(1, math.min(fullmoves, 9999)),
+      ].join(' ');
 
   @override
   bool operator ==(Object other) {
@@ -264,15 +233,10 @@ class Pockets {
   int of(Side side, Role role) => (_value >> _offset(side, role)) & 0x1F;
 
   /// Gets the total number of pieces in the pocket.
-  int get size {
-    int total = 0;
-    for (final side in Side.values) {
-      for (final role in Role.values) {
-        total += of(side, role);
-      }
-    }
-    return total;
-  }
+  int get size => Side.values.fold(
+        0,
+        (acc, s) => acc + Role.values.fold(0, (acc2, r) => acc2 + of(s, r)),
+      );
 
   /// Counts the number of pieces by [Role].
   int count(Role role) => of(Side.white, role) + of(Side.black, role);
@@ -304,50 +268,6 @@ class Pockets {
 
   @override
   int get hashCode => _value.hashCode;
-}
-
-List<String> _splitFen(String fen) {
-  final List<String> parts = [];
-  final length = fen.length;
-  int start = 0;
-  int i = 0;
-
-  while (i < length) {
-    if (_isSeparator(fen.codeUnitAt(i))) {
-      if (i > start) {
-        parts.add(fen.substring(start, i));
-      }
-      while (i < length && _isSeparator(fen.codeUnitAt(i))) {
-        i++;
-      }
-      start = i;
-    } else {
-      i++;
-    }
-  }
-
-  if (start < length) {
-    parts.add(fen.substring(start));
-  }
-  return parts;
-}
-
-/// Matches the character set of standard Dart/ECMAScript `[\s_]`
-bool _isSeparator(int code) {
-  return code == 32 || // Space ' '
-      code == 95 || // Underscore '_'
-      code == 9 || // Tab '\t'
-      code == 10 || // Line feed '\n'
-      code == 13 || // Carriage return '\r'
-      code == 11 || // Vertical tab '\v'
-      code == 12 || // Form feed '\f'
-      code == 160 || // Non-breaking space '\u00A0'
-      code == 65279 || // Byte order mark / zero-width space '\uFEFF'
-      // General Unicode space separators (category "Zs")
-      (code >= 0x2000 && code <= 0x200A) ||
-      code == 0x202F ||
-      code == 0x205F ||
-      code == 0x3000;
 }
 
 Pockets _parsePockets(String pocketPart) {
@@ -392,40 +312,29 @@ SquareSet _parseCastlingFen(Board board, String castlingPart) {
   if (castlingPart == '-') {
     return castlingRights;
   }
-
-  const charA = 97; // 'a'.codeUnitAt(0)
-  const charH = 104; // 'h'.codeUnitAt(0)
-  const charK = 107; // 'k'.codeUnitAt(0)
-  const charQ = 113; // 'q'.codeUnitAt(0)
-
-  for (int i = 0; i < castlingPart.length; i++) {
-    final code = castlingPart.codeUnitAt(i);
-    // Determine color based on letter casing (Upper-case letters are ASCII 65-90)
-    final isUpper = code >= 65 && code <= 90;
-    final side = isUpper ? Side.white : Side.black;
-    final rank = isUpper ? Rank.first : Rank.eighth;
-
-    // Normalize to lowercase
-    final lowerCode = isUpper ? code + 32 : code;
-
-    if (lowerCode >= charA && lowerCode <= charH) {
-      castlingRights = castlingRights
-          .withSquare(Square.fromCoords(File(lowerCode - charA), rank));
-    } else if (lowerCode == charK || lowerCode == charQ) {
+  for (final rune in castlingPart.runes) {
+    final c = String.fromCharCode(rune);
+    final lower = c.toLowerCase();
+    final lowerCode = lower.codeUnitAt(0);
+    final side = c == lower ? Side.black : Side.white;
+    final rank = side == Side.white ? Rank.first : Rank.eighth;
+    if ('a'.codeUnitAt(0) <= lowerCode && lowerCode <= 'h'.codeUnitAt(0)) {
+      castlingRights = castlingRights.withSquare(
+          Square.fromCoords(File(lowerCode - 'a'.codeUnitAt(0)), rank));
+    } else if (lower == 'k' || lower == 'q') {
       final rooksAndKings = (board.bySide(side) & SquareSet.backrankOf(side)) &
           (board.rooks | board.kings);
-      final candidate = lowerCode == charK
+      final candidate = lower == 'k'
           ? rooksAndKings.squares.lastOrNull
           : rooksAndKings.squares.firstOrNull;
       castlingRights = castlingRights.withSquare(
           candidate != null && board.rooks.has(candidate)
               ? candidate
-              : Square.fromCoords(lowerCode == charK ? File.h : File.a, rank));
+              : Square.fromCoords(lower == 'k' ? File.h : File.a, rank));
     } else {
       throw const FenException(IllegalFenCause.castling);
     }
   }
-
   if (Side.values.any((color) =>
       SquareSet.backrankOf(color).intersect(castlingRights).size > 2)) {
     throw const FenException(IllegalFenCause.castling);
@@ -434,28 +343,15 @@ SquareSet _parseCastlingFen(Board board, String castlingPart) {
 }
 
 String _makePockets(Pockets pockets) {
-  final buffer = StringBuffer('[');
-
-  // White pockets (uppercase letters)
-  for (final r in Role.values) {
-    final count = pockets.of(Side.white, r);
-    final letter = r.letter.toUpperCase();
-    for (int i = 0; i < count; i++) {
-      buffer.write(letter);
-    }
-  }
-
-  // Black pockets (lowercase letters)
-  for (final r in Role.values) {
-    final count = pockets.of(Side.black, r);
-    final letter = r.letter;
-    for (int i = 0; i < count; i++) {
-      buffer.write(letter);
-    }
-  }
-
-  buffer.write(']');
-  return buffer.toString();
+  final wPart = [
+    for (final r in Role.values)
+      ...List.filled(pockets.of(Side.white, r), r.letter)
+  ].join();
+  final bPart = [
+    for (final r in Role.values)
+      ...List.filled(pockets.of(Side.black, r), r.letter)
+  ].join();
+  return '[${wPart.toUpperCase()}$bPart]';
 }
 
 String _makeCastlingFen(Board board, SquareSet castlingRights) {
@@ -485,16 +381,8 @@ String _makeRemainingChecks((int, int) checks) {
   return '$white+$black';
 }
 
-int? _parseSmallUint(String str) {
-  if (str.isEmpty || str.length > 4) return null;
-  int result = 0;
-  for (int i = 0; i < str.length; i++) {
-    final code = str.codeUnitAt(i);
-    if (code < 48 || code > 57) return null; // Check if 0-9
-    result = result * 10 + (code - 48);
-  }
-  return result;
-}
+int? _parseSmallUint(String str) =>
+    RegExp(r'^\d{1,4}$').hasMatch(str) ? int.parse(str) : null;
 
 int _nthIndexOf(String haystack, String needle, int nth) {
   int index = haystack.indexOf(needle);
