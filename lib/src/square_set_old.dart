@@ -4,6 +4,7 @@ import './models.dart';
 ///
 /// All the squares are represented by a single 64-bit integer, where each bit
 /// corresponds to a square, using a little-endian rank-file mapping.
+/// See also [Square].
 ///
 /// The set operations are implemented as bitwise operations on the integer.
 extension type const SquareSet(int value) {
@@ -11,13 +12,10 @@ extension type const SquareSet(int value) {
   const SquareSet.fromSquare(Square square) : value = 1 << square;
 
   /// Creates a [SquareSet] from several [Square]s.
-  factory SquareSet.fromSquares(Iterable<Square> squares) {
-    int mask = 0;
-    for (final square in squares) {
-      mask |= 1 << square;
-    }
-    return SquareSet(mask);
-  }
+  SquareSet.fromSquares(Iterable<Square> squares)
+      : value = squares
+            .map((square) => 1 << square)
+            .fold(0, (left, right) => left | right);
 
   /// Create a [SquareSet] containing all squares of the given rank.
   const SquareSet.fromRank(Rank rank)
@@ -34,7 +32,7 @@ extension type const SquareSet(int value) {
       : value = side == Side.white ? 0xff : 0xff00000000000000;
 
   static const empty = SquareSet(0);
-  static const full = SquareSet(-1); // 0xffffffffffffffff
+  static const full = SquareSet(0xffffffffffffffff);
   static const lightSquares = SquareSet(0x55AA55AA55AA55AA);
   static const darkSquares = SquareSet(0xAA55AA55AA55AA55);
   static const diagonal = SquareSet(0x8040201008040201);
@@ -47,56 +45,43 @@ extension type const SquareSet(int value) {
   static const aFile = SquareSet(0x0101010101010101);
   static const hFile = SquareSet(0x8080808080808080);
 
-@pragma('vm:prefer-inline')
-SquareSet shr(int shift) {
-  if (shift >= 64) return SquareSet.empty;
-  if (shift > 0) return SquareSet(value >>> shift);
-  return this;
-}
+  /// Bitwise right shift
+  SquareSet shr(int shift) {
+    if (shift >= 64) return SquareSet.empty;
+    if (shift > 0) return SquareSet(value >>> shift);
+    return this;
+  }
 
-@pragma('vm:prefer-inline')
-SquareSet shl(int shift) {
-  if (shift >= 64) return SquareSet.empty;
-  if (shift > 0) return SquareSet(value << shift);
-  return this;
-}
+  /// Bitwise left shift
+  SquareSet shl(int shift) {
+    if (shift >= 64) return SquareSet.empty;
+    if (shift > 0) return SquareSet(value << shift);
+    return this;
+  }
 
-  @pragma('vm:prefer-inline')
+  /// Returns a new [SquareSet] with a bitwise XOR of this set and [other].
   SquareSet xor(SquareSet other) => SquareSet(value ^ other.value);
-
-  @pragma('vm:prefer-inline')
   SquareSet operator ^(SquareSet other) => SquareSet(value ^ other.value);
 
-  @pragma('vm:prefer-inline')
+  /// Returns a new [SquareSet] with the squares that are in either this set or [other].
   SquareSet union(SquareSet other) => SquareSet(value | other.value);
-
-  @pragma('vm:prefer-inline')
   SquareSet operator |(SquareSet other) => SquareSet(value | other.value);
 
-  @pragma('vm:prefer-inline')
+  /// Returns a new [SquareSet] with the squares that are in both this set and [other].
   SquareSet intersect(SquareSet other) => SquareSet(value & other.value);
-
-  @pragma('vm:prefer-inline')
   SquareSet operator &(SquareSet other) => SquareSet(value & other.value);
 
-  @pragma('vm:prefer-inline')
-  SquareSet minus(SquareSet other) => SquareSet(value & ~other.value);
+  /// Returns a new [SquareSet] with the [other] squares removed from this set.
+  SquareSet minus(SquareSet other) => SquareSet(value - other.value);
+  SquareSet operator -(SquareSet other) => SquareSet(value - other.value);
 
-  /// This must use arithmetic subtraction rather than set-difference.
-  /// The engine uses Hyperbola Quintessence for sliding piece attack rays,
-  /// which relies explicitly on standard mathematical borrowing behavior.
-  /// For pure set difference, use [minus] or [diff].
-@pragma('vm:prefer-inline')
-SquareSet operator -(SquareSet other) => SquareSet(value - other.value);
-
-  @pragma('vm:prefer-inline')
+  /// Returns the set complement of this set.
   SquareSet complement() => SquareSet(~value);
 
-  @pragma('vm:prefer-inline')
+  /// Returns the set difference of this set and [other].
   SquareSet diff(SquareSet other) => SquareSet(value & ~other.value);
 
   /// Flips the set vertically.
-  @pragma('vm:prefer-inline')
   SquareSet flipVertical() {
     const k1 = 0x00FF00FF00FF00FF;
     const k2 = 0x0000FFFF0000FFFF;
@@ -107,7 +92,6 @@ SquareSet operator -(SquareSet other) => SquareSet(value - other.value);
   }
 
   /// Flips the set horizontally.
-  @pragma('vm:prefer-inline')
   SquareSet mirrorHorizontal() {
     const k1 = 0x5555555555555555;
     const k2 = 0x3333333333333333;
@@ -118,68 +102,60 @@ SquareSet operator -(SquareSet other) => SquareSet(value - other.value);
     return SquareSet(x);
   }
 
-  @pragma('vm:prefer-inline')
+  /// Returns the number of squares in the set.
   int get size => _popcnt64(value);
 
-  @pragma('vm:prefer-inline')
+  /// Returns true if the set is empty.
   bool get isEmpty => value == 0;
 
-  @pragma('vm:prefer-inline')
+  /// Returns true if the set is not empty.
   bool get isNotEmpty => value != 0;
 
-  @pragma('vm:prefer-inline')
-  Square? get first => value == 0 ? null : Square(_ntz64(value));
+  /// Returns the first square in the set, or null if the set is empty.
+  Square? get first => _getFirstSquare(value);
 
-  @pragma('vm:prefer-inline')
-  Square? get last => value == 0 ? null : Square(63 - _nlz64(value));
+  /// Returns the last square in the set, or null if the set is empty.
+  Square? get last => _getLastSquare(value);
 
   /// Returns the squares in the set as an iterable.
-  Iterable<Square> get squares => _SquareIterable(value);
+  Iterable<Square> get squares => _iterateSquares();
 
   /// Returns the squares in the set as an iterable in reverse order.
-  Iterable<Square> get squaresReversed => _SquareReversedIterable(value);
+  Iterable<Square> get squaresReversed => _iterateSquaresReversed();
 
-  @pragma('vm:prefer-inline')
-  List<Square> toSquareList() {
-    final count = size;
-    final list = List<Square>.filled(count, const Square(0));
+  /// Returns true if the set contains more than one square.
+  bool get moreThanOne => isNotEmpty && size > 1;
 
-    int bb = value;
-    int index = 0;
-    while (bb != 0) {
-      final int sq = _ntz64(bb);
-      list[index++] = Square(sq);
-      bb &= bb - 1;
-    }
-    return list;
-  }
-
-  @pragma('vm:prefer-inline')
-  bool get moreThanOne => value != 0 && (value & (value - 1)) != 0;
-
-  @pragma('vm:prefer-inline')
+  /// Returns square if it is single, otherwise returns null.
   Square? get singleSquare => moreThanOne ? null : last;
 
-  @pragma('vm:prefer-inline')
-  bool has(Square square) => (value & (1 << square)) != 0;
+  /// Returns true if the [SquareSet] contains the given [square].
+  bool has(Square square) {
+    return value & (1 << square) != 0;
+  }
 
-  @pragma('vm:prefer-inline')
-  bool isIntersected(SquareSet other) => (value & other.value) != 0;
+  /// Returns true if the square set has any square in the [other] square set.
+  bool isIntersected(SquareSet other) => intersect(other).isNotEmpty;
 
-  @pragma('vm:prefer-inline')
-  bool isDisjoint(SquareSet other) => (value & other.value) == 0;
+  /// Returns true if the square set is disjoint from the [other] square set.
+  bool isDisjoint(SquareSet other) => intersect(other).isEmpty;
 
-  @pragma('vm:prefer-inline')
-  SquareSet withSquare(Square square) => SquareSet(value | (1 << square));
+  /// Returns a new [SquareSet] with the given [square] added.
+  SquareSet withSquare(Square square) {
+    return SquareSet(value | (1 << square));
+  }
 
-  @pragma('vm:prefer-inline')
-  SquareSet withoutSquare(Square square) => SquareSet(value & ~(1 << square));
+  /// Returns a new [SquareSet] with the given [square] removed.
+  SquareSet withoutSquare(Square square) {
+    return SquareSet(value & ~(1 << square));
+  }
 
-  @pragma('vm:prefer-inline')
-  SquareSet toggleSquare(Square square) => SquareSet(value ^ (1 << square));
+  /// Removes [Square] if present, or put it if absent.
+  SquareSet toggleSquare(Square square) {
+    return SquareSet(value ^ (1 << square));
+  }
 
-  /// Instantly clears the lowest set bit using standard bitwise masking.
-  @pragma('vm:prefer-inline')
+  /// Returns a new [SquareSet] with its first [Square] removed.
   SquareSet withoutFirst() {
     final f = first;
     return f != null ? withoutSquare(f) : empty;
@@ -192,23 +168,50 @@ SquareSet operator -(SquareSet other) => SquareSet(value - other.value);
       buffer.write(has(Square(square)) ? '1' : '0');
     }
     final b = buffer.toString();
-    final firstPart = int.parse(b.substring(0, 32), radix: 2)
+    final first = int.parse(b.substring(0, 32), radix: 2)
         .toRadixString(16)
         .toUpperCase()
         .padLeft(8, '0');
-    final lastPart = int.parse(b.substring(32, 64), radix: 2)
+    final last = int.parse(b.substring(32, 64), radix: 2)
         .toRadixString(16)
         .toUpperCase()
         .padLeft(8, '0');
-    final stringVal = '$firstPart$lastPart';
+    final stringVal = '$first$last';
     if (stringVal == '0000000000000000') {
       return '0';
     }
-    return '0x$firstPart$lastPart';
+    return '0x$first$last';
+  }
+
+  Iterable<Square> _iterateSquares() sync* {
+    int bitboard = value;
+    while (bitboard != 0) {
+      final square = _getFirstSquare(bitboard);
+      bitboard ^= 1 << square!;
+      yield square;
+    }
+  }
+
+  Iterable<Square> _iterateSquaresReversed() sync* {
+    int bitboard = value;
+    while (bitboard != 0) {
+      final square = _getLastSquare(bitboard);
+      bitboard ^= 1 << square!;
+      yield square;
+    }
+  }
+
+  Square? _getFirstSquare(int bitboard) {
+    final ntz = _ntz64(bitboard);
+    return ntz >= 0 && ntz < 64 ? Square(ntz) : null;
+  }
+
+  Square? _getLastSquare(int bitboard) {
+    if (bitboard == 0) return null;
+    return Square(63 - _nlz64(bitboard));
   }
 }
 
-@pragma('vm:prefer-inline')
 int _popcnt64(int n) {
   final count2 = n - ((n >>> 1) & 0x5555555555555555);
   final count4 =
@@ -217,7 +220,6 @@ int _popcnt64(int n) {
   return (count8 * 0x0101010101010101) >>> 56;
 }
 
-@pragma('vm:prefer-inline')
 int _nlz64(int x) {
   int r = x;
   r |= r >>> 1;
@@ -227,65 +229,6 @@ int _nlz64(int x) {
   r |= r >>> 16;
   r |= r >>> 32;
   return 64 - _popcnt64(r);
-}
-
-class _SquareIterable extends Iterable<Square> {
-  final int bits;
-  const _SquareIterable(this.bits);
-
-  @override
-  Iterator<Square> get iterator => _SquareIterator(bits);
-}
-
-class _SquareIterator implements Iterator<Square> {
-  int _bits;
-  Square _current = const Square(0);
-
-  _SquareIterator(this._bits);
-
-  @override
-  Square get current => _current;
-
-  @override
-  bool moveNext() {
-    if (_bits == 0) return false;
-    _current = Square(_ntz64(_bits));
-    _bits &= _bits - 1; // Clear LSB
-    return true;
-  }
-}
-
-class _SquareReversedIterable extends Iterable<Square> {
-  final int bits;
-  const _SquareReversedIterable(this.bits);
-
-  @override
-  Iterator<Square> get iterator => _SquareReversedIterator(bits);
-}
-
-class _SquareReversedIterator implements Iterator<Square> {
-  int _bits;
-  Square _current = const Square(0);
-
-  _SquareReversedIterator(this._bits);
-
-  @override
-  Square get current => _current;
-
-  @override
-  bool moveNext() {
-    if (_bits == 0) return false;
-    final int sq = 63 - _nlz64(_bits);
-    _current = Square(sq);
-    _bits ^= 1 << sq; // Clear MSB
-    return true;
-  }
-}
-
-/// Internal bit-scanning extension for high-performance LSB lookups.
-extension FastBitScan on int {
-  @pragma('vm:prefer-inline')
-  Square get lsbSquare => Square(_ntz64(this));
 }
 
 // from https://gist.github.com/jtmcdole/297434f327077dbfe5fb19da3b4ef5be

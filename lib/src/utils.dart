@@ -1,5 +1,6 @@
 import 'models.dart';
 import 'position.dart';
+import 'square_set.dart';
 
 /// Returns all the legal moves of the [Position] in a convenient format.
 ///
@@ -9,27 +10,34 @@ Map<Square, Set<Square>> makeLegalMoves(
   bool includeAlternateCastlingMoves = true,
 }) {
   final Map<Square, Set<Square>> result = {};
+  final turn = pos.turn;
+  final kingPos = pos.board.kingOf(turn);
+
   for (final entry in pos.legalMoves.entries) {
-    final dests = entry.value.squares;
-    if (dests.isNotEmpty) {
-      final from = entry.key;
-      final destSet = dests.toSet();
-      if (includeAlternateCastlingMoves &&
-          from == pos.board.kingOf(pos.turn) &&
-          entry.key.file == 4) {
-        if (dests.contains(Square.a1)) {
-          destSet.add(Square.c1);
-        } else if (dests.contains(Square.a8)) {
-          destSet.add(Square.c8);
-        }
-        if (dests.contains(Square.h1)) {
-          destSet.add(Square.g1);
-        } else if (dests.contains(Square.h8)) {
-          destSet.add(Square.g8);
-        }
+    final SquareSet squareSet = entry.value;
+    final int value = squareSet.value;
+    if (value == 0) continue; // Skip empty move sets quickly
+
+    final from = entry.key;
+    final Set<Square> destSet = {};
+
+    // Ultra-fast bit-scan loop to populate the Destination Set
+    for (int i = 0; i < 64; i++) {
+      if ((value & (1 << i)) != 0) {
+        destSet.add(Square(i));
       }
-      result[from] = destSet;
     }
+
+    // Castling alternate representations logic
+    // FIXED: Removed 'from.file == 4' to natively support Chess960 configurations
+    if (includeAlternateCastlingMoves && from == kingPos) {
+      if ((value & (1 << Square.a1.value)) != 0) destSet.add(Square.c1);
+      if ((value & (1 << Square.a8.value)) != 0) destSet.add(Square.c8);
+      if ((value & (1 << Square.h1.value)) != 0) destSet.add(Square.g1);
+      if ((value & (1 << Square.h8.value)) != 0) destSet.add(Square.g8);
+    }
+
+    result[from] = destSet;
   }
   return result;
 }

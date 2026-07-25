@@ -1,4 +1,5 @@
 import 'package:meta/meta.dart';
+import './square_set.dart';
 
 /// The chessboard side, white or black.
 enum Side {
@@ -30,22 +31,14 @@ enum CastlingSide {
 
 /// Piece role, such as pawn, knight, etc.
 enum Role {
-  pawn('p', 'P'),
-  knight('n', 'N'),
-  bishop('b', 'B'),
-  rook('r', 'R'),
-  king('k', 'K'),
-  queen('q', 'Q');
+  pawn,
+  knight,
+  bishop,
+  rook,
+  king,
+  queen;
 
-  /// The lowercase FEN letter representing this role (Black piece).
-  final String letter;
-
-  /// The uppercase FEN letter representing this role (White piece).
-  final String uppercaseLetter;
-
-  const Role(this.letter, this.uppercaseLetter);
-
-  /// Gets the role from a character case-insensitively.
+  /// Gets the role from a character.
   static Role? fromChar(String ch) {
     switch (ch.toLowerCase()) {
       case 'p':
@@ -64,6 +57,26 @@ enum Role {
         return null;
     }
   }
+
+  /// Gets the role letter in lowercase (as for black piece in FEN notation).
+  String get letter => switch (this) {
+        Role.pawn => 'p',
+        Role.knight => 'n',
+        Role.bishop => 'b',
+        Role.rook => 'r',
+        Role.queen => 'q',
+        Role.king => 'k',
+      };
+
+  /// Gets the role letter in uppercase (as for white piece in FEN notation).
+  String get uppercaseLetter => switch (this) {
+        Role.pawn => 'P',
+        Role.knight => 'N',
+        Role.bishop => 'B',
+        Role.rook => 'R',
+        Role.queen => 'Q',
+        Role.king => 'K',
+      };
 }
 
 /// A file of the chessboard.
@@ -168,23 +181,33 @@ extension type const Rank._(int value) implements int {
 }
 
 /// A square of the chessboard.
+///
+/// The square is represented with an integer ranging from 0 to 63, using a
+/// little-endian rank-file mapping (LERF):
+/// ```txt
+///  8 | 56 57 58 59 60 61 62 63
+///  7 | 48 49 50 51 52 53 54 55
+///  6 | 40 41 42 43 44 45 46 47
+///  5 | 32 33 34 35 36 37 38 39
+///  4 | 24 25 26 27 28 29 30 31
+///  3 | 16 17 18 19 20 21 22 23
+///  2 | 8  9  10 11 12 13 14 15
+///  1 | 0  1  2  3  4  5  6  7
+///    -------------------------
+///      a  b  c  d  e  f  g  h
+/// ```
+///
+/// See also:
+/// - [File]
+/// - [Rank]
+/// - [SquareSet] for the manipulation of sets of squares.
 extension type const Square._(int value) implements int {
   /// Gets the chessboard [Square] from a square index between 0 and 63.
   const Square(this.value) : assert(value >= 0 && value < 64);
 
-  // REMOVED: get hashCode (handled natively by underlying int)
-
-  static const _names = [
-    'a1', 'b1', 'c1', 'd1', 'e1', 'f1', 'g1', 'h1',
-    'a2', 'b2', 'c2', 'd2', 'e2', 'f2', 'g2', 'h2',
-    'a3', 'b3', 'c3', 'd3', 'e3', 'f3', 'g3', 'h3',
-    'a4', 'b4', 'c4', 'd4', 'e4', 'f4', 'g4', 'h4',
-    'a5', 'b5', 'c5', 'd5', 'e5', 'f5', 'g5', 'h5',
-    'a6', 'b6', 'c6', 'd6', 'e6', 'f6', 'g6', 'h6',
-    'a7', 'b7', 'c7', 'd7', 'e7', 'f7', 'g7', 'h7',
-    'a8', 'b8', 'c8', 'd8', 'e8', 'f8', 'g8', 'h8',
-  ];
-
+  /// Gets a [Square] from its name in algebraic notation.
+  ///
+  /// Throws a [FormatException] if the algebraic notation is invalid.
   factory Square.fromName(String algebraic) {
     if (algebraic.length != 2) {
       throw FormatException('Invalid algebraic notation: $algebraic');
@@ -197,10 +220,12 @@ extension type const Square._(int value) implements int {
     return Square(file | (rank << 3));
   }
 
-  @pragma('vm:prefer-inline')
+  /// Gets a [Square] from its file and rank.
   factory Square.fromCoords(File file, Rank rank) => Square(file | (rank << 3));
 
-  @pragma('vm:prefer-inline')
+  /// Parses a square name in algebraic notation.
+  ///
+  /// Returns either a [Square] or `null` if the algebraic notation is invalid.
   static Square? parse(String algebraic) {
     if (algebraic.length != 2) return null;
     final file = algebraic.codeUnitAt(0) - 97;
@@ -209,6 +234,7 @@ extension type const Square._(int value) implements int {
     return Square(file | (rank << 3));
   }
 
+  /// All squares on the chessboard, from a1 to h8.
   static const values = [
     a1, b1, c1, d1, e1, f1, g1, h1,
     a2, b2, c2, d2, e2, f2, g2, h2,
@@ -217,19 +243,21 @@ extension type const Square._(int value) implements int {
     a5, b5, c5, d5, e5, f5, g5, h5,
     a6, b6, c6, d6, e6, f6, g6, h6,
     a7, b7, c7, d7, e7, f7, g7, h7,
-    a8, b8, c8, d8, e8, f8, g8, h8,
+    a8, b8, c8, d8, e8, f8, g8, h8
   ];
 
-  @pragma('vm:prefer-inline')
+  /// The file of the square on the board.
   File get file => File(value & 0x7);
 
-  @pragma('vm:prefer-inline')
+  /// The rank of the square on the board.
   Rank get rank => Rank(value >> 3);
 
-  @pragma('vm:prefer-inline')
-  String get name => _names[value];
+  /// Unique identifier of the square, using pure algebraic notation.
+  String get name => file.name + rank.name;
 
-  @pragma('vm:prefer-inline')
+  /// Returns the square offset by [delta].
+  ///
+  /// Returns `null` if the resulting square is out of bounds.
   Square? offset(int delta) {
     assert(delta >= -63 && delta <= 63);
     final newSquare = value + delta;
@@ -239,7 +267,7 @@ extension type const Square._(int value) implements int {
     return Square(newSquare);
   }
 
-  @pragma('vm:prefer-inline')
+  /// Return the bitwise XOR of the numeric square representation.
   Square xor(Square other) => Square(value ^ other.value);
 
   static const a1 = Square(0);
@@ -334,79 +362,53 @@ enum PieceKind {
 }
 
 /// Describes a chess piece by its color, role and promotion status.
-extension type const Piece._(int value) implements int {
-  /// Zero-allocation, valid constant bitwise constructor.
+@immutable
+class Piece {
   const Piece({
-    required Side color,
-    required Role role,
-    bool promoted = false,
-  }) : value = (color == Side.white ? 0 : 8) |
-            (promoted ? 16 : 0) |
-            (role == Role.pawn
-                ? 0
-                : role == Role.knight
-                    ? 1
-                    : role == Role.bishop
-                        ? 2
-                        : role == Role.rook
-                            ? 3
-                            : role == Role.king
-                                ? 4
-                                : 5);
+    required this.color,
+    required this.role,
+    this.promoted = false,
+  });
 
-  // REMOVED: get hashCode (extension types inherit int.hashCode natively)
-
-  @pragma('vm:prefer-inline')
-  Side get color => (value & 0x08) == 0 ? Side.white : Side.black;
-
-  @pragma('vm:prefer-inline')
-  Role get role => Role.values[value & 0x07];
-
-  @pragma('vm:prefer-inline')
-  bool get promoted => (value & 0x10) != 0;
+  final Side color;
+  final Role role;
+  final bool promoted;
 
   static Piece? fromChar(String ch) {
     final role = Role.fromChar(ch);
     if (role != null) {
       return Piece(
-        role: role,
-        color: ch.toLowerCase() == ch ? Side.black : Side.white,
-      );
+          role: role, color: ch.toLowerCase() == ch ? Side.black : Side.white);
     }
     return null;
   }
 
-  static const _kinds = [
-    PieceKind.whitePawn,   // 0
-    PieceKind.whiteKnight, // 1
-    PieceKind.whiteBishop, // 2
-    PieceKind.whiteRook,   // 3
-    PieceKind.whiteKing,   // 4
-    PieceKind.whiteQueen,  // 5
-    PieceKind.whitePawn,   // 6 (padding)
-    PieceKind.whitePawn,   // 7 (padding)
-    PieceKind.blackPawn,   // 8
-    PieceKind.blackKnight, // 9
-    PieceKind.blackBishop, // 10
-    PieceKind.blackRook,   // 11
-    PieceKind.blackKing,   // 12
-    PieceKind.blackQueen,  // 13
-  ];
+  /// Gets the piece kind.
+  PieceKind get kind => switch (role) {
+        Role.pawn =>
+          color == Side.white ? PieceKind.whitePawn : PieceKind.blackPawn,
+        Role.knight =>
+          color == Side.white ? PieceKind.whiteKnight : PieceKind.blackKnight,
+        Role.bishop =>
+          color == Side.white ? PieceKind.whiteBishop : PieceKind.blackBishop,
+        Role.rook =>
+          color == Side.white ? PieceKind.whiteRook : PieceKind.blackRook,
+        Role.queen =>
+          color == Side.white ? PieceKind.whiteQueen : PieceKind.blackQueen,
+        Role.king =>
+          color == Side.white ? PieceKind.whiteKing : PieceKind.blackKing,
+      };
 
-  @pragma('vm:prefer-inline')
-  PieceKind get kind => _kinds[value & 0x0F];
+  /// Gets the FEN character of this piece.
+  ///
+  /// For example, a white pawn is `P`, a black knight is `n`.
+  String get fenChar {
+    String r = role.letter;
+    if (color == Side.white) r = r.toUpperCase();
+    if (promoted) r += '~';
+    return r;
+  }
 
-  static const _fenChars = [
-    'P', 'N', 'B', 'R', 'K', 'Q', '', '',
-    'p', 'n', 'b', 'r', 'k', 'q', '', '',
-    'P~', 'N~', 'B~', 'R~', 'K~', 'Q~', '', '',
-    'p~', 'n~', 'b~', 'r~', 'k~', 'q~', '', '',
-  ];
-
-  @pragma('vm:prefer-inline')
-  String get fenChar => _fenChars[value & 0x1F];
-
-  @pragma('vm:prefer-inline')
   Piece copyWith({
     Side? color,
     Role? role,
@@ -419,30 +421,42 @@ extension type const Piece._(int value) implements int {
     );
   }
 
-  static const _displayStrings = [
-    'whitepawn', 'whiteknight', 'whitebishop', 'whiterook', 'whiteking', 'whitequeen', '', '',
-    'blackpawn', 'blackknight', 'blackbishop', 'blackrook', 'blackking', 'blackqueen', '', '',
-  ];
+  @override
+  String toString() {
+    return '${color.name}${role.name}';
+  }
 
-  @pragma('vm:prefer-inline')
-  String get displayString => _displayStrings[value & 0x0F];
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is Piece &&
+            other.runtimeType == runtimeType &&
+            color == other.color &&
+            role == other.role &&
+            promoted == other.promoted;
+  }
 
-  static const whitePawn = Piece._(0);
-  static const whiteKnight = Piece._(1);
-  static const whiteBishop = Piece._(2);
-  static const whiteRook = Piece._(3);
-  static const whiteKing = Piece._(4);
-  static const whiteQueen = Piece._(5);
+  @override
+  int get hashCode => Object.hash(color, role, promoted);
 
-  static const blackPawn = Piece._(8);
-  static const blackKnight = Piece._(9);
-  static const blackBishop = Piece._(10);
-  static const blackRook = Piece._(11);
-  static const blackKing = Piece._(12);
-  static const blackQueen = Piece._(13);
+  static const whitePawn = Piece(color: Side.white, role: Role.pawn);
+  static const whiteKnight = Piece(color: Side.white, role: Role.knight);
+  static const whiteBishop = Piece(color: Side.white, role: Role.bishop);
+  static const whiteRook = Piece(color: Side.white, role: Role.rook);
+  static const whiteQueen = Piece(color: Side.white, role: Role.queen);
+  static const whiteKing = Piece(color: Side.white, role: Role.king);
+
+  static const blackPawn = Piece(color: Side.black, role: Role.pawn);
+  static const blackKnight = Piece(color: Side.black, role: Role.knight);
+  static const blackBishop = Piece(color: Side.black, role: Role.bishop);
+  static const blackRook = Piece(color: Side.black, role: Role.rook);
+  static const blackQueen = Piece(color: Side.black, role: Role.queen);
+  static const blackKing = Piece(color: Side.black, role: Role.king);
 }
 
 /// Base class for a chess move.
+///
+/// A move can be either a [NormalMove] or a [DropMove].
 @immutable
 sealed class Move {
   const Move({
@@ -456,20 +470,24 @@ sealed class Move {
   String get uci;
 
   /// Parses a UCI string into a move.
+  ///
+  /// Will return a [NormalMove] or a [DropMove] depending on the UCI string.
+  ///
+  /// Returns `null` if UCI string is not valid.
   static Move? parse(String str) {
-    if (str.length == 4 && str[1] == '@') {
+    if (str[1] == '@' && str.length == 4) {
       final role = Role.fromChar(str[0]);
       final to = Square.parse(str.substring(2));
-      if (role != null && to != null) {
-        return DropMove(to: to, role: role);
-      }
+      if (role != null && to != null) return DropMove(to: to, role: role);
     } else if (str.length == 4 || str.length == 5) {
       final from = Square.parse(str.substring(0, 2));
       final to = Square.parse(str.substring(2, 4));
       Role? promotion;
       if (str.length == 5) {
         promotion = Role.fromChar(str[4]);
-        if (promotion == null) return null;
+        if (promotion == null) {
+          return null;
+        }
       }
       if (from != null && to != null) {
         return NormalMove(from: from, to: to, promotion: promotion);
@@ -485,7 +503,9 @@ sealed class Move {
   Iterable<Square> get squares;
 
   @override
-  String toString() => 'Move($uci)';
+  String toString() {
+    return 'Move($uci)';
+  }
 }
 
 /// Represents a chess move, which is possibly a promotion.
@@ -498,6 +518,8 @@ class NormalMove extends Move {
   });
 
   /// Constructs a [NormalMove] from a UCI string.
+  ///
+  /// Throws a [FormatException] if the UCI string is invalid.
   factory NormalMove.fromUci(String uci) {
     final from = Square.parse(uci.substring(0, 2));
     final to = Square.parse(uci.substring(2, 4));
@@ -527,7 +549,7 @@ class NormalMove extends Move {
   NormalMove withPromotion(Role? promotion) =>
       NormalMove(from: from, to: to, promotion: promotion);
 
-  /// Gets UCI notation.
+  /// Gets UCI notation, like `g1f3` for a normal move, `a7a8q` for promotion to a queen.
   @override
   String get uci =>
       from.name + to.name + (promotion != null ? promotion!.letter : '');
@@ -535,10 +557,7 @@ class NormalMove extends Move {
   @override
   bool operator ==(Object other) {
     return identical(this, other) ||
-        other is NormalMove &&
-            from == other.from &&
-            to == other.to &&
-            promotion == other.promotion;
+        other.runtimeType == runtimeType && hashCode == other.hashCode;
   }
 
   @override
@@ -548,12 +567,15 @@ class NormalMove extends Move {
 /// Represents a drop move.
 @immutable
 class DropMove extends Move {
+  /// Constructs a [DropMove] from a target square and a role.
   const DropMove({
     required super.to,
     required this.role,
   });
 
   /// Constructs a [DropMove] from a UCI string.
+  ///
+  /// Throws a [FormatException] if the UCI string is invalid.
   factory DropMove.fromUci(String uci) {
     final role = Role.fromChar(uci[0]);
     final to = Square.parse(uci.substring(2));
@@ -579,7 +601,7 @@ class DropMove extends Move {
   @override
   bool operator ==(Object other) {
     return identical(this, other) ||
-        other is DropMove && to == other.to && role == other.role;
+        other.runtimeType == runtimeType && hashCode == other.hashCode;
   }
 
   @override
@@ -588,22 +610,41 @@ class DropMove extends Move {
 
 /// An enumeration of the possible causes of an illegal FEN string.
 enum IllegalFenCause {
+  /// The FEN string is not in the correct format.
   format,
+
+  /// The board part of the FEN string is invalid.
   board,
+
+  /// The turn part of the FEN string is invalid.
   turn,
+
+  /// The castling part of the FEN string is invalid.
   castling,
+
+  /// The en passant part of the FEN string is invalid.
   enPassant,
+
+  /// The halfmove clock part of the FEN string is invalid.
   halfmoveClock,
+
+  /// The fullmove number part of the FEN string is invalid.
   fullmoveNumber,
+
+  /// The remaining checks part of the FEN string is invalid.
   remainingChecks,
+
+  /// The pockets part of the FEN string is invalid.
   pockets,
 }
 
 /// An exception thrown when trying to parse an invalid FEN string.
 @immutable
 class FenException implements Exception {
+  /// Constructs a [FenException] with a [cause].
   const FenException(this.cause);
 
+  /// The cause of the exception.
   final IllegalFenCause cause;
 
   @override
@@ -613,8 +654,10 @@ class FenException implements Exception {
 /// Exception thrown when trying to play an illegal move.
 @immutable
 class PlayException implements Exception {
+  /// Constructs a [PlayException] with a [message].
   const PlayException(this.message);
 
+  /// The exception message.
   final String message;
 
   @override
@@ -623,19 +666,36 @@ class PlayException implements Exception {
 
 /// Enumeration of the possible causes of an illegal setup.
 enum IllegalSetupCause {
+  /// There are no pieces on the board.
   empty,
+
+  /// The player not to move is in check.
   oppositeCheck,
+
+  /// There are impossibly many checkers, two sliding checkers are
+  /// aligned, or check is not possible because the last move was a
+  /// double pawn push.
+  ///
+  /// Such a position cannot be reached by any sequence of legal moves.
   impossibleCheck,
+
+  /// There are pawns on the backrank.
   pawnsOnBackrank,
+
+  /// A king is missing, or there are too many kings.
   kings,
+
+  /// A variant specific rule is violated.
   variant,
 }
 
 /// Exception thrown when trying to create a [Position] from an illegal [Setup].
 @immutable
 class PositionSetupException implements Exception {
+  /// Constructs a [PositionSetupException] with a [cause].
   const PositionSetupException(this.cause);
 
+  /// The cause of the exception.
   final IllegalSetupCause cause;
 
   static const empty = PositionSetupException(IllegalSetupCause.empty);

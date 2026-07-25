@@ -175,20 +175,24 @@ abstract class Position {
   /// Tests if the position has at least one legal move.
   bool get hasSomeLegalMoves {
     final context = _makeContext();
-    if (context.isVariantEnd) return false;
-
     for (final square in board.bySide(turn).squares) {
-      if (_legalMovesOf(square, context: context).isNotEmpty) {
-        return true;
-      }
+      if (_legalMovesOf(square, context: context).isNotEmpty) return true;
     }
     return false;
   }
 
+  /// Gets all the legal moves of this position.
+  ///
+  /// Returns a [SquareSet] of all the legal moves for each [Square].
+  ///
+  /// In order to support Chess960, the castling move format is encoded as the
+  /// king-to-rook move only.
+  ///
+  /// Use the [makeLegalMoves] helper to get all the legal moves including alternative
+  /// castling moves.
   Map<Square, SquareSet> get legalMoves {
     final context = _makeContext();
     if (context.isVariantEnd) return const {};
-
     return {
       for (final s in board.bySide(turn).squares)
         s: _legalMovesOf(s, context: context)
@@ -271,6 +275,7 @@ abstract class Position {
     if (firstAnnotationIndex != -1) {
       san = san.substring(0, firstAnnotationIndex);
     }
+    if (san.isEmpty) return null;
 
     // Crazyhouse
     if (san.contains('@')) {
@@ -334,6 +339,7 @@ abstract class Position {
     if (oneIndex <= san.codeUnits[0] && san.codeUnits[0] <= eightIndex) {
       pawnRank = Rank(san.codeUnits[0] - oneIndex);
       san = san.substring(1);
+      if (san.isEmpty) return null;
     }
     final isPawnMove = aIndex <= san.codeUnits[0] && san.codeUnits[0] <= hIndex;
 
@@ -361,7 +367,7 @@ abstract class Position {
 
       if (isCapturing) {
         // Invalid SAN
-        if (san[1] != 'x') {
+        if (san.length < 2 || san[1] != 'x') {
           return null;
         }
 
@@ -371,12 +377,16 @@ abstract class Position {
 
       if (isPromotion) {
         // Invalid SAN
-        if (san[san.length - 2] != '=') {
+        if (san.length < 3 || san[san.length - 2] != '=') {
           return null;
         }
 
         final promotionCharacter = san[san.length - 1];
         promotionRole = Role.fromChar(promotionCharacter);
+
+        if (promotionRole == null) {
+          return null;
+        }
 
         // Remove the promotion string
         san = san.substring(0, san.length - 2);
@@ -391,6 +401,10 @@ abstract class Position {
 
       final destination = Square.parse(san);
       if (destination == null) {
+        return null;
+      }
+
+      if (SquareSet.backranks.has(destination) && promotionRole == null) {
         return null;
       }
 
@@ -417,6 +431,10 @@ abstract class Position {
         return null;
       }
 
+      if (promotionRole == Role.king && this is! Antichess) {
+        return null;
+      }
+
       final move =
           NormalMove(from: source, to: destination, promotion: promotionRole);
       if (!isLegal(move)) {
@@ -424,6 +442,9 @@ abstract class Position {
       }
       return move;
     }
+
+    // Invalid SAN
+    if (san.length < 3) return null;
 
     // The final two moves define the destination
     final destination = Square.parse(san.substring(san.length - 2));
@@ -434,18 +455,16 @@ abstract class Position {
     san = san.substring(0, san.length - 2);
     if (isCapturing) {
       // Invalid SAN
-      if (san[san.length - 1] != 'x') {
+      if (san.isEmpty || san[san.length - 1] != 'x') {
         return null;
       }
       san = san.substring(0, san.length - 1);
     }
+    if (san.isEmpty) return null;
 
     // For non-pawn moves, the first character describes a role
     final role = Role.fromChar(san[0]);
-    if (role == null) {
-      return null;
-    }
-    if (role == Role.pawn) {
+    if (role == null || role == Role.pawn) {
       return null;
     }
     san = san.substring(1);
@@ -518,105 +537,82 @@ abstract class Position {
     switch (move) {
       case NormalMove(from: final from, to: final to, promotion: final prom):
         final piece = board.pieceAt(from);
-        if (piece == null) return copyWith();
+        if (piece == null) {
+          return copyWith();
+        }
 
-        // Fast-path lookup for captured piece
-        final capturedPiece = board.pieceAt(to);
-        Castles newCastles = castles;
+        Square? epCaptureTarget;
         Square? newEpSquare;
+        Castles newCastles = castles;
+        Board newBoard =
+            board; // Start with current board to avoid intermediate allocations
 
-        // 1. KING & CASTLING (Infrequent path)
-        if (piece.role == Role.king) {
+        // Optimization: Branch by role first to avoid processing rules for unrelated pieces
+        if (piece.role == Role.pawn) {
+          if (to == epSquare) {
+            epCaptureTarget = Square(to + (turn == Side.white ? -8 : 8));
+            newBoard = newBoard.removePieceAt(epCaptureTarget);
+          }
+          final delta = from - to;
+          if (delta.abs() == 16 && from >= Square.a2 && from <= Square.h7) {
+            newEpSquare = Square((from + to) >>> 1);
+          }
+        } else if (piece.role == Role.king) {
           final castlingSide = _getCastlingSide(move);
           if (castlingSide != null) {
             final rookFrom = castles.rookOf(turn, castlingSide);
-            final rook = rookFrom != null ? board.pieceAt(rookFrom) : null;
+            if (rookFrom != null) {
+              final rook = board.pieceAt(rookFrom);
+              newBoard = newBoard.removePieceAt(from).removePieceAt(rookFrom);
 
-            Board newBoard = board.removePieceAt(from);
-            if (rookFrom != null) newBoard = newBoard.removePieceAt(rookFrom);
-            newBoard =
-                newBoard.setPieceAt(kingCastlesTo(turn, castlingSide), piece);
-            if (rook != null) {
               newBoard =
-                  newBoard.setPieceAt(rookCastlesTo(turn, castlingSide), rook);
-            }
+                  newBoard.setPieceAt(kingCastlesTo(turn, castlingSide), piece);
+              if (rook != null) {
+                newBoard = newBoard.setPieceAt(
+                    rookCastlesTo(turn, castlingSide), rook);
+              }
+              newCastles = newCastles.discardSide(turn);
 
-            return copyWith(
-              halfmoves: halfmoves + 1,
-              fullmoves: turn == Side.black ? fullmoves + 1 : fullmoves,
-              board: newBoard,
-              turn: turn.opposite,
-              castles: newCastles.discardSide(turn),
-              epSquare: null,
-            );
+              // Standard captures are impossible during castling, compute final state immediately
+              return copyWith(
+                halfmoves: halfmoves + 1,
+                fullmoves: turn == Side.black ? fullmoves + 1 : fullmoves,
+                board: newBoard,
+                turn: turn.opposite,
+                castles: newCastles,
+                epSquare: null,
+              );
+            }
           }
           newCastles = newCastles.discardSide(turn);
-        }
-        // 2. PAWNS & EN PASSANT (Medium frequency)
-        else if (piece.role == Role.pawn) {
-          if (to == epSquare && capturedPiece == null) {
-            final epTarget = Square(to + (turn == Side.white ? -8 : 8));
-            final epCaptured = board.pieceAt(epTarget);
-
-            final newBoard = board
-                .removePieceAt(from)
-                .removePieceAt(epTarget)
-                .setPieceAt(to, piece);
-
-            return copyWith(
-              halfmoves: 0,
-              fullmoves: turn == Side.black ? fullmoves + 1 : fullmoves,
-              pockets: epCaptured != null
-                  ? pockets?.increment(epCaptured.color.opposite, Role.pawn)
-                  : pockets,
-              board: newBoard,
-              turn: turn.opposite,
-              castles: newCastles,
-              epSquare: null,
-            );
-          }
-
-          final delta = (from - to).abs();
-          if (delta == 16) {
-            // Rank 2 for White is squares 8..15 (a2..h2)
-            // Rank 7 for Black is squares 48..55 (a7..h7)
-            final isStandardRankStart = turn == Side.white
-                ? (from >= Square.a2 && from <= Square.h2)
-                : (from >= Square.a7 && from <= Square.h7);
-
-            if (isStandardRankStart) {
-              newEpSquare = Square((from + to) >>> 1);
-            }
-          }
-        }
-        // 3. ROOKS
-        else if (piece.role == Role.rook) {
+        } else if (piece.role == Role.rook) {
           newCastles = newCastles.discardRookAt(from);
         }
 
-        // Check if captured piece was a rook (discard castling right)
-        if (capturedPiece?.role == Role.rook) {
-          newCastles = newCastles.discardRookAt(to);
-        }
+        // Standard Move path (Non-castling)
+        final capturedPiece = board.pieceAt(to) ??
+            (to == epSquare && epCaptureTarget != null
+                ? board.pieceAt(epCaptureTarget)
+                : null);
+        final isCapture = capturedPiece != null;
 
-        // 4. STANDARD MOVE FAST-PATH (95%+ of all moves)
+        // Apply clean standard piece movement logic on the board
+        newBoard = newBoard.removePieceAt(from);
         final newPiece = prom != null
             ? piece.copyWith(role: prom, promoted: pockets != null)
             : piece;
+        newBoard = newBoard.setPieceAt(to, newPiece);
 
-        // Single remove + set chain
-        final newBoard = board.removePieceAt(from).setPieceAt(to, newPiece);
+        if (isCapture && capturedPiece.role == Role.rook) {
+          newCastles = newCastles.discardRookAt(to);
+        }
 
         return copyWith(
-          halfmoves: capturedPiece != null || piece.role == Role.pawn
-              ? 0
-              : halfmoves + 1,
+          halfmoves: isCapture || piece.role == Role.pawn ? 0 : halfmoves + 1,
           fullmoves: turn == Side.black ? fullmoves + 1 : fullmoves,
-          pockets: capturedPiece != null
-              ? pockets?.increment(
-                  capturedPiece.color.opposite,
-                  capturedPiece.promoted ? Role.pawn : capturedPiece.role,
-                )
+          pockets: isCapture
+              ? pockets?.increment(capturedPiece.color.opposite,
+                  capturedPiece.promoted ? Role.pawn : capturedPiece.role)
               : pockets,
           board: newBoard,
           turn: turn.opposite,
@@ -638,8 +634,7 @@ abstract class Position {
 
   /// Returns the SAN of this [Move] and the updated [Position], without checking if the move is legal.
   (Position, String) makeSanUnchecked(Move move) {
-    final ctx = _makeContext();
-    final san = _makeSanWithoutSuffix(move, context: ctx);
+    final san = _makeSanWithoutSuffix(move);
     final newPos = playUnchecked(move);
     final suffixed = newPos.outcome?.winner != null
         ? '$san#'
@@ -779,7 +774,7 @@ abstract class Position {
     }
   }
 
-  String _makeSanWithoutSuffix(Move move, {_Context? context}) {
+  String _makeSanWithoutSuffix(Move move) {
     String san = '';
     switch (move) {
       case NormalMove(from: final from, to: final to, promotion: final prom):
@@ -810,7 +805,7 @@ abstract class Position {
             others = others.intersect(board.bySide(turn)).withoutSquare(from);
 
             if (others.isNotEmpty) {
-              final ctx = context ?? _makeContext();
+              final ctx = _makeContext();
               for (final from in others.squares) {
                 if (!_legalMovesOf(from, context: ctx).has(to)) {
                   others = others.withoutSquare(from);
@@ -857,7 +852,6 @@ abstract class Position {
   SquareSet _legalMovesOf(Square square, {_Context? context}) {
     final ctx = context ?? _makeContext();
     if (ctx.isVariantEnd) return SquareSet.empty;
-
     final piece = board.pieceAt(square);
     if (piece == null || piece.color != turn) return SquareSet.empty;
 
@@ -865,26 +859,19 @@ abstract class Position {
     SquareSet? legalEpSquare;
     if (piece.role == Role.pawn) {
       pseudo = pawnAttacks(turn, square) & board.bySide(turn.opposite);
-
-      final pushShift = turn == Side.white ? 8 : -8;
-      final singleSq = square + pushShift;
-
-      if (singleSq >= 0 &&
-          singleSq < 64 &&
-          !board.occupied.has(Square(singleSq))) {
-        pseudo = pseudo.withSquare(Square(singleSq));
-
-        final canDouble = turn == Side.white ? square < 16 : square >= 48;
-        if (canDouble) {
-          final doubleSq = singleSq + pushShift;
-          if (!board.occupied.has(Square(doubleSq))) {
-            pseudo = pseudo.withSquare(Square(doubleSq));
-          }
+      final delta = turn == Side.white ? 8 : -8;
+      final step = square + delta;
+      if (0 <= step && step < 64 && !board.occupied.has(Square(step))) {
+        pseudo = pseudo.withSquare(Square(step));
+        final canDoubleStep =
+            turn == Side.white ? square < Square.a3 : square >= Square.a7;
+        final doubleStep = step + delta;
+        if (canDoubleStep && !board.occupied.has(Square(doubleStep))) {
+          pseudo = pseudo.withSquare(Square(doubleStep));
         }
       }
-
       if (epSquare != null && _canCaptureEp(square)) {
-        final pawn = epSquare! - pushShift;
+        final pawn = epSquare! - delta;
         if (ctx.checkers.isEmpty || ctx.checkers.singleSquare == pawn) {
           legalEpSquare = SquareSet.fromSquare(epSquare!);
         }
@@ -1076,6 +1063,7 @@ abstract class Chess extends Position {
   factory Chess.fromSetup(Setup setup, {bool? ignoreImpossibleCheck}) {
     final pos = Chess(
       board: setup.board,
+      pockets: setup.pockets,
       turn: setup.turn,
       castles: Castles.fromSetup(setup),
       epSquare: _validEpSquare(setup),
@@ -1138,6 +1126,7 @@ abstract class Antichess extends Position {
   factory Antichess.fromSetup(Setup setup, {bool? ignoreImpossibleCheck}) {
     final pos = Antichess(
       board: setup.board,
+      pockets: setup.pockets,
       turn: setup.turn,
       castles: Castles.empty,
       epSquare: _validEpSquare(setup),
@@ -1185,50 +1174,19 @@ abstract class Antichess extends Position {
 
   @override
   _Context _makeContext() {
-    // 1. Gather raw king / check data first without creating a _Context instance yet
-    final king = board.kingOf(turn);
-    final blockers = king != null ? _sliderBlockers(king) : SquareSet.empty;
-    final currentCheckers = king != null ? checkers : SquareSet.empty;
-
-    bool mustCapture = false;
-
-    // 2. En-passant capture check
+    final ctx = super._makeContext();
     if (epSquare != null &&
         pawnAttacks(turn.opposite, epSquare!)
             .isIntersected(board.piecesOf(turn, Role.pawn))) {
-      mustCapture = true;
-    } else {
-      // 3. Scan for standard captures
-      final enemy = board.bySide(turn.opposite);
-
-      // Temp context for pseudo-legal lookups if required by signature, or pass raw fields
-      final tempCtx = _Context(
-        isVariantEnd: isVariantEnd,
-        mustCapture: false,
-        king: king,
-        blockers: blockers,
-        checkers: currentCheckers,
-      );
-
-      for (final from in board.bySide(turn).squares) {
-        if (_pseudoLegalMoves(this, from, tempCtx).isIntersected(enemy)) {
-          mustCapture = true;
-          break; // Early exit on first capture found!
-        }
-      }
-
-      // Return the pre-constructed tempCtx if no capture was forced
-      if (!mustCapture) return tempCtx;
+      return ctx.copyWith(mustCapture: true);
     }
-
-    // 4. Return single final context with mustCapture set
-    return _Context(
-      isVariantEnd: isVariantEnd,
-      mustCapture: mustCapture,
-      king: king,
-      blockers: blockers,
-      checkers: currentCheckers,
-    );
+    final enemy = board.bySide(turn.opposite);
+    for (final from in board.bySide(turn).squares) {
+      if (_pseudoLegalMoves(this, from, ctx).isIntersected(enemy)) {
+        return ctx.copyWith(mustCapture: true);
+      }
+    }
+    return ctx;
   }
 
   @override
@@ -1304,6 +1262,7 @@ abstract class Atomic extends Position {
   factory Atomic.fromSetup(Setup setup, {bool? ignoreImpossibleCheck}) {
     final pos = Atomic(
       board: setup.board,
+      pockets: setup.pockets,
       turn: setup.turn,
       castles: Castles.fromSetup(setup),
       epSquare: _validEpSquare(setup),
@@ -1612,25 +1571,38 @@ abstract class Crazyhouse extends Position {
 
   @override
   SquareSet get legalDrops {
-    final mask = board.occupied
-        .complement()
-        .intersect(pockets != null && pockets!.hasQuality(turn)
-            ? SquareSet.full
-            : pockets != null && pockets!.hasPawn(turn)
-                ? SquareSet.backranks.complement()
-                : SquareSet.empty);
+    final currentPockets = pockets;
+    // If there are no pockets or the player has nothing to drop, exit immediately
+    if (currentPockets == null ||
+        (!currentPockets.hasQuality(turn) && !currentPockets.hasPawn(turn))) {
+      return SquareSet.empty;
+    }
 
     final ctx = _makeContext();
+    if (ctx.isVariantEnd) return SquareSet.empty;
+
+    // Start with all empty squares on the board
+    SquareSet mask = board.occupied.complement();
+
+    // Optimization: If they ONLY have pawns, they can't drop on the backranks.
+    if (!currentPockets.hasQuality(turn) && currentPockets.hasPawn(turn)) {
+      mask = mask.intersect(SquareSet.backranks.complement());
+    }
+
+    // Handle Checks
     if (ctx.king != null && ctx.checkers.isNotEmpty) {
       final checker = ctx.checkers.singleSquare;
+
+      // Double check: A single drop cannot block two rays at once.
       if (checker == null) {
         return SquareSet.empty;
-      } else {
-        return mask & between(checker, ctx.king!);
       }
-    } else {
-      return mask;
+
+      // Single check: Must drop exclusively between the king and the checker.
+      return mask.intersect(between(checker, ctx.king!));
     }
+
+    return mask;
   }
 }
 
@@ -1671,6 +1643,7 @@ abstract class KingOfTheHill extends Position {
   factory KingOfTheHill.fromSetup(Setup setup, {bool? ignoreImpossibleCheck}) {
     final pos = KingOfTheHill(
       board: setup.board,
+      pockets: setup.pockets,
       turn: setup.turn,
       castles: Castles.fromSetup(setup),
       epSquare: _validEpSquare(setup),
@@ -1821,9 +1794,22 @@ abstract class ThreeCheck extends Position {
       return newPos;
     }
   }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+
+    // Enforce type matching here to guarantee symmetry.
+    if (other is! ThreeCheck) return false;
+
+    return super == other && other.remainingChecks == remainingChecks;
+  }
+
+  @override
+  int get hashCode => Object.hash(super.hashCode, remainingChecks);
 }
 
-/// A variant where the goal is to put your king on the eighth rank.
+/// A variant where the goal is to put your king on the eigth rank.
 @immutable
 abstract class RacingKings extends Position {
   @override
@@ -1851,6 +1837,11 @@ abstract class RacingKings extends Position {
   });
 
   /// Sets up a playable [RacingKings] position.
+  ///
+  /// Throws a [PositionSetupException] if the [Setup] does not meet basic validity
+  /// requirements.
+  /// Optionnaly pass [ignoreImpossibleCheck] if you want to skip that
+  /// requirement.
   factory RacingKings.fromSetup(Setup setup, {bool? ignoreImpossibleCheck}) {
     final pos = RacingKings(
       board: setup.board,
@@ -1878,9 +1869,9 @@ abstract class RacingKings extends Position {
     final blackKing = board.kingOf(Side.black);
     if (blackKing == null) return false;
 
-    // Fast-path: If black king is not adjacent to rank 8, return false immediately!
-    final reachableGoal = kingAttacks(blackKing) & goal;
-    if (reachableGoal.isEmpty) return false;
+    // Grab the intersection of king attacks and the goal rank
+    final goalAttacks = kingAttacks(blackKing).intersect(goal);
+    if (goalAttacks.isEmpty) return false;
 
     final context = _Context(
       isVariantEnd: false,
@@ -1889,38 +1880,31 @@ abstract class RacingKings extends Position {
       blockers: _sliderBlockers(blackKing),
       checkers: checkers,
     );
+    final legalMoves = _legalMovesOf(blackKing, context: context);
 
-    return (_legalMovesOf(blackKing, context: context) & goal).isNotEmpty;
+    // Instead of .where(), use a fast bitwise intersection check!
+    return legalMoves.isIntersected(goalAttacks);
   }
 
-  @pragma('vm:prefer-inline')
   bool get blackInGoal =>
-      (board.black.value & goal.value & board.kings.value) != 0;
-
-  @pragma('vm:prefer-inline')
+      board.black.intersect(goal).intersect(board.kings).isNotEmpty;
   bool get whiteInGoal =>
-      (board.white.value & goal.value & board.kings.value) != 0;
+      board.white.intersect(goal).intersect(board.kings).isNotEmpty;
 
   @override
   SquareSet _legalMovesOf(Square square, {_Context? context}) {
-    final candidates = super._legalMovesOf(square, context: context);
-    if (candidates.isEmpty) return SquareSet.empty;
+    final baseMoves = super._legalMovesOf(square, context: context);
+    int validMask = 0;
 
-    int candidateBits = candidates.value;
-    int legalBits = 0;
-
-    while (candidateBits != 0) {
-      final lsb = candidateBits & -candidateBits;
-      final toSquare = lsb.lsbSquare; // Pass the isolated LSB mask
-
-      if (!playUnchecked(NormalMove(from: square, to: toSquare)).isCheck) {
-        legalBits |= lsb;
+    // Use the fast square list extraction we built earlier
+    for (final to in baseMoves.toSquareList()) {
+      // Call playUnchecked directly on the Position instance
+      if (!playUnchecked(NormalMove(from: square, to: to)).isCheck) {
+        validMask |= 1 << to;
       }
-
-      candidateBits &= candidateBits - 1; // Clear LSB in 1 instruction
     }
 
-    return SquareSet(legalBits);
+    return SquareSet(validMask);
   }
 
   @override
@@ -1942,7 +1926,12 @@ abstract class RacingKings extends Position {
   Outcome? get variantOutcome {
     if (!isVariantEnd) return null;
     if (whiteInGoal && blackInGoal) return Outcome.draw;
+    // If white is in the goal, check whether
+    // black can reach the goal. If not, then
+    // white wins
     if (whiteInGoal && !blackCanReachGoal) return Outcome.whiteWins;
+    // If black is the only side in the goal
+    // then black wins
     if (blackInGoal) return Outcome.blackWins;
 
     return Outcome.draw;
