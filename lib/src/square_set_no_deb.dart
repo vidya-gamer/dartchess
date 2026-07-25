@@ -236,10 +236,18 @@ int _nlz64(int x) {
 }
 
 @pragma('vm:prefer-inline')
-int _ntz64(int val) {
-  final int lsb = val & -val;
-  return deBruijnTable[(lsb * deBruijn64) >>> 58];
-}
+int _ntz64(int x) => _ntzLut64[(x & -x) % 131];
+const _ntzLut64 = [
+  64, 0, 1, -1, 2, 46, -1, -1, 3, 14, 47, 56, -1, 18, -1, //
+  -1, 4, 43, 15, 35, 48, 38, 57, 23, -1, -1, 19, -1, -1, 51,
+  -1, 29, 5, 63, 44, 12, 16, 41, 36, -1, 49, -1, 39, -1, 58,
+  60, 24, -1, -1, 62, -1, -1, 20, 26, -1, -1, -1, -1, 52, -1,
+  -1, -1, 30, -1, 6, -1, -1, -1, 45, -1, 13, 55, 17, -1, 42,
+  34, 37, 22, -1, -1, 50, 28, -1, 11, 40, -1, -1, -1, 59,
+  -1, 61, -1, 25, -1, -1, -1, -1, -1, -1, -1, -1, 54, -1,
+  33, 21, -1, 27, 10, -1, -1, -1, -1, -1, -1, -1, -1, 53,
+  32, -1, 9, -1, -1, -1, -1, 31, 8, -1, -1, 7, -1, -1,
+];
 
 class _SquareIterable extends Iterable<Square> {
   final int bits;
@@ -293,22 +301,3 @@ class _SquareReversedIterator implements Iterator<Square> {
     return true;
   }
 }
-
-/// Internal bit-scanning extension for high-performance LSB lookups.
-extension FastBitScan on int {
-  @pragma('vm:prefer-inline')
-  Square get lsbSquare => Square(_ntz64(this));
-}
-
-const int deBruijn64 = 0x03f79d71b4cb0a89;
-
-const List<int> deBruijnTable = [
-   0,  1, 48,  2, 57, 49, 28,  3,
-  61, 58, 50, 42, 38, 29, 17,  4,
-  62, 55, 59, 36, 53, 51, 43, 22,
-  45, 39, 33, 30, 24, 18, 12,  5,
-  63, 47, 56, 27, 60, 41, 37, 16,
-  54, 35, 52, 21, 44, 32, 23, 11,
-  46, 26, 40, 15, 34, 20, 31, 10,
-  25, 14, 19,  9, 13,  8,  7,  6,
-];
